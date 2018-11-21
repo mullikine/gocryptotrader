@@ -31,9 +31,9 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - ZB Setup() init error")
 	}
 
-	zbConfig.AuthenticatedAPISupport = true
-	zbConfig.APIKey = apiKey
-	zbConfig.APISecret = apiSecret
+	zbConfig.API.AuthenticatedSupport = true
+	zbConfig.API.Credentials.Key = apiKey
+	zbConfig.API.Credentials.Secret = apiSecret
 
 	z.Setup(zbConfig)
 }
@@ -41,7 +41,7 @@ func TestSetup(t *testing.T) {
 func TestSpotNewOrder(t *testing.T) {
 	t.Parallel()
 
-	if z.APIKey == "" || z.APISecret == "" {
+	if !z.ValidateAPICredentials() {
 		t.Skip()
 	}
 
@@ -62,7 +62,7 @@ func TestSpotNewOrder(t *testing.T) {
 func TestCancelExistingOrder(t *testing.T) {
 	t.Parallel()
 
-	if z.APIKey == "" || z.APISecret == "" {
+	if !z.ValidateAPICredentials() {
 		t.Skip()
 	}
 
@@ -115,7 +115,7 @@ func TestGetMarkets(t *testing.T) {
 func TestGetAccountInfo(t *testing.T) {
 	t.Parallel()
 
-	if z.APIKey == "" || z.APISecret == "" {
+	if !z.ValidateAPICredentials() {
 		t.Skip()
 	}
 
@@ -246,9 +246,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func isRealOrderTestEnabled() bool {
-	if z.APIKey == "" || z.APISecret == "" ||
-		z.APIKey == "Key" || z.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !z.ValidateAPICredentials() || !canManipulateRealOrders {
 		return false
 	}
 	return true
@@ -257,16 +255,17 @@ func isRealOrderTestEnabled() bool {
 func TestSubmitOrder(t *testing.T) {
 	z.SetDefaults()
 	TestSetup(t)
-	z.Verbose = true
 
 	if !isRealOrderTestEnabled() {
-		t.Skip(fmt.Sprintf("ApiKey: %s. Can place orders: %v", z.APIKey, canManipulateRealOrders))
+		t.Skip(fmt.Sprintf("ApiKey: %s. Can place orders: %v", z.API.Credentials.Key, canManipulateRealOrders))
 	}
+
 	var pair = pair.CurrencyPair{
 		Delimiter:      "_",
 		FirstCurrency:  symbol.QTUM,
 		SecondCurrency: symbol.USDT,
 	}
+
 	response, err := z.SubmitOrder(pair, exchange.Buy, exchange.Market, 1, 10, "hi")
 	if err != nil || !response.IsOrderPlaced {
 		t.Errorf("Order failed to be placed: %v", err)

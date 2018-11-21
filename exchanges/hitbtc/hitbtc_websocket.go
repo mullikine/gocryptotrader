@@ -56,7 +56,7 @@ func (h *HitBTC) WsConnect() error {
 
 // WsSubscribe subscribes to the relevant channels
 func (h *HitBTC) WsSubscribe() error {
-	enabledPairs := h.GetEnabledCurrencies()
+	enabledPairs := h.GetEnabledPairs()
 	for _, p := range enabledPairs {
 		pF := exchange.FormatExchangeCurrency(h.GetName(), p)
 

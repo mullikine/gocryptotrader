@@ -31,17 +31,17 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - Binance Setup() init error")
 	}
 
-	binanceConfig.AuthenticatedAPISupport = true
-	binanceConfig.APIKey = testAPIKey
-	binanceConfig.APISecret = testAPISecret
+	binanceConfig.API.AuthenticatedSupport = true
+	binanceConfig.API.Credentials.Key = testAPIKey
+	binanceConfig.API.Credentials.Secret = testAPISecret
 	b.Setup(binanceConfig)
 }
 
-func TestGetExchangeValidCurrencyPairs(t *testing.T) {
+func TestFetchTradablePairs(t *testing.T) {
 	t.Parallel()
-	_, err := b.GetExchangeValidCurrencyPairs()
+	_, err := b.FetchTradablePairs()
 	if err != nil {
-		t.Error("Test Failed - Binance GetExchangeValidCurrencyPairs() error", err)
+		t.Error("Test Failed - Binance FetchTradablePairs() error", err)
 	}
 }
 
@@ -335,9 +335,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // -----------------------------------------------------------------------------------------------------------------------------
 
 func isRealOrderTestEnabled() bool {
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !b.ValidateAPICredentials() || !canManipulateRealOrders {
 		return false
 	}
 	return true
@@ -356,6 +354,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.LTC,
 		SecondCurrency: symbol.BTC,
 	}
+
 	response, err := b.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 1, "clientId")
 	if err != nil || !response.IsOrderPlaced {
 		t.Errorf("Order failed to be placed: %v", err)
@@ -367,9 +366,7 @@ func TestCancelExchangeOrder(t *testing.T) {
 	b.SetDefaults()
 	TestSetup(t)
 
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !isRealOrderTestEnabled() {
 		t.Skip()
 	}
 
@@ -386,7 +383,7 @@ func TestCancelExchangeOrder(t *testing.T) {
 	// Act
 	err := b.CancelOrder(orderCancellation)
 
-	// Assert 
+	// Assert
 	if err != nil {
 		t.Errorf("Could not cancel order: %s", err)
 	}

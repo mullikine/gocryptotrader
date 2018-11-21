@@ -24,19 +24,10 @@ func TestSetDefaults(t *testing.T) {
 	if a.Name != "ANX" {
 		t.Error("Test Failed - ANX SetDefaults() incorrect values set")
 	}
-	if a.Enabled != false {
+	if a.Enabled != true {
 		t.Error("Test Failed - ANX SetDefaults() incorrect values set")
 	}
-	if a.TakerFee != 0.02 {
-		t.Error("Test Failed - ANX SetDefaults() incorrect values set")
-	}
-	if a.MakerFee != 0.01 {
-		t.Error("Test Failed - ANX SetDefaults() incorrect values set")
-	}
-	if a.Verbose != false {
-		t.Error("Test Failed - ANX SetDefaults() incorrect values set")
-	}
-	if a.RESTPollingDelay != 10 {
+	if a.Verbose != true {
 		t.Error("Test Failed - ANX SetDefaults() incorrect values set")
 	}
 }
@@ -45,22 +36,20 @@ func TestSetup(t *testing.T) {
 	anxSetupConfig := config.GetConfig()
 	anxSetupConfig.LoadConfig("../../testdata/configtest.json")
 	anxConfig, err := anxSetupConfig.GetExchangeConfig("ANX")
-	anxConfig.AuthenticatedAPISupport = true
+	anxConfig.API.AuthenticatedSupport = true
 
 	if err != nil {
 		t.Error("Test Failed - ANX Setup() init error")
 	}
+
 	a.Setup(anxConfig)
 	if testAPIKey != "" && testAPISecret != "" {
-		a.APIKey = testAPIKey
-		a.APISecret = testAPISecret
-		a.AuthenticatedAPISupport = true
+		a.API.Credentials.Key = testAPIKey
+		a.API.Credentials.Secret = testAPISecret
+		a.API.AuthenticatedSupport = true
 	}
 
 	if a.Enabled != true {
-		t.Error("Test Failed - ANX Setup() incorrect values set")
-	}
-	if a.RESTPollingDelay != 10 {
 		t.Error("Test Failed - ANX Setup() incorrect values set")
 	}
 	if a.Verbose != false {
@@ -84,8 +73,8 @@ func TestGetCurrencies(t *testing.T) {
 	}
 }
 
-func TestGetTradablePairs(t *testing.T) {
-	_, err := a.GetTradablePairs()
+func TestFetchTradablePairs(t *testing.T) {
+	_, err := a.FetchTradablePairs()
 	if err != nil {
 		t.Fatalf("Test failed. TestGetTradablePairs failed. Err: %s", err)
 	}
@@ -225,9 +214,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // ----------------------------------------------------------------------------------------------------------------------------
 
 func isRealOrderTestEnabled() bool {
-	if a.APIKey == "" || a.APISecret == "" ||
-		a.APIKey == "Key" || a.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !a.ValidateAPICredentials() || !canManipulateRealOrders {
 		return false
 	}
 	return true
@@ -240,11 +227,13 @@ func TestSubmitOrder(t *testing.T) {
 	if !isRealOrderTestEnabled() {
 		t.Skip()
 	}
+
 	var p = pair.CurrencyPair{
 		Delimiter:      "_",
 		FirstCurrency:  symbol.BTC,
 		SecondCurrency: symbol.USD,
 	}
+
 	response, err := a.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 1, "clientId")
 	if err != nil || !response.IsOrderPlaced {
 		t.Errorf("Order failed to be placed: %v", err)

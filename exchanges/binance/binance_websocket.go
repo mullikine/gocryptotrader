@@ -164,7 +164,7 @@ func (b *Binance) WSConnect() error {
 		Dialer.Proxy = http.ProxyURL(url)
 	}
 
-	for _, ePair := range b.GetEnabledCurrencies() {
+	for _, ePair := range b.GetEnabledPairs() {
 		err := b.SeedLocalCache(ePair)
 		if err != nil {
 			return err

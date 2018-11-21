@@ -31,9 +31,9 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - OKCoin Setup() init error")
 	}
 
-	okcoinConfig.AuthenticatedAPISupport = true
-	okcoinConfig.APIKey = apiKey
-	okcoinConfig.APISecret = apiSecret
+	okcoinConfig.API.AuthenticatedSupport = true
+	okcoinConfig.API.Credentials.Key = apiKey
+	okcoinConfig.API.Credentials.Secret = apiSecret
 
 	o.Setup(okcoinConfig)
 }
@@ -151,18 +151,16 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func isRealOrderTestEnabled() bool {
-	if o.APIKey == "" || o.APISecret == "" ||
-		o.APIKey == "Key" || o.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !o.ValidateAPICredentials() || !canManipulateRealOrders {
 		return false
 	}
+
 	return true
 }
 
 func TestSubmitOrder(t *testing.T) {
 	o.SetDefaults()
 	TestSetup(t)
-	o.Verbose = true
 
 	if !isRealOrderTestEnabled() {
 		t.Skip()
@@ -173,6 +171,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.BTC,
 		SecondCurrency: symbol.EUR,
 	}
+
 	response, err := o.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 10, "hi")
 	if err != nil || !response.IsOrderPlaced {
 		t.Errorf("Order failed to be placed: %v", err)

@@ -11,6 +11,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
 	"github.com/toorop/go-pusher"
 )
@@ -101,7 +102,7 @@ func (b *Bitstamp) WsConnect() error {
 
 	go b.WsReadData()
 
-	for _, p := range b.GetEnabledCurrencies() {
+	for _, p := range b.GetEnabledPairs() {
 		orderbookSeed, err := b.GetOrderbook(p.Pair().String())
 		if err != nil {
 			return err
@@ -225,7 +226,7 @@ func (b *Bitstamp) WsReadData() {
 }
 
 // WsUpdateOrderbook updates local cache of orderbook information
-func (b *Bitstamp) WsUpdateOrderbook(ob PusherOrderbook, p pair.CurrencyPair, assetType string) error {
+func (b *Bitstamp) WsUpdateOrderbook(ob PusherOrderbook, p pair.CurrencyPair, assetType assets.AssetType) error {
 	if len(ob.Asks) == 0 && len(ob.Bids) == 0 {
 		return errors.New("bitstamp_websocket.go error - no orderbook data")
 	}

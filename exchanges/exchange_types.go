@@ -1,10 +1,12 @@
 package exchange
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/nonce"
 	"github.com/thrasher-/gocryptotrader/exchanges/request"
 )
@@ -15,7 +17,7 @@ type FeeType string
 // InternationalBankTransactionType custom type for calculating fees based on fiat transaction types
 type InternationalBankTransactionType string
 
-// Const declarations for fee types
+// Const vars for the exchange package
 const (
 	BankFee                        FeeType = "bankFee"
 	InternationalBankDepositFee    FeeType = "internationalBankDepositFee"
@@ -23,10 +25,7 @@ const (
 	CryptocurrencyTradeFee         FeeType = "cryptocurrencyTradeFee"
 	CyptocurrencyDepositFee        FeeType = "cyptocurrencyDepositFee"
 	CryptocurrencyWithdrawalFee    FeeType = "cryptocurrencyWithdrawalFee"
-)
 
-// Const declarations for international transaction types
-const (
 	WireTransfer    InternationalBankTransactionType = "wireTransfer"
 	PerfectMoney    InternationalBankTransactionType = "perfectMoney"
 	Neteller        InternationalBankTransactionType = "neteller"
@@ -114,6 +113,42 @@ const (
 	UnknownWithdrawalTypeText string = "UNKNOWN"
 )
 
+// ModifyOrder is a an order modifyer
+type ModifyOrder struct {
+	OrderType
+	OrderSide
+	Price  float64
+	Amount float64
+}
+
+// OrderType enforces a standard for Ordertypes across the code base
+type OrderType string
+
+// OrderType ...types
+const (
+	Limit  OrderType = "Limit"
+	Market OrderType = "Market"
+)
+
+// ToString changes the ordertype to the exchange standard and returns a string
+func (o OrderType) ToString() string {
+	return fmt.Sprintf("%v", o)
+}
+
+// OrderSide enforces a standard for OrderSides across the code base
+type OrderSide string
+
+// OrderSide types
+const (
+	Buy  OrderSide = "Buy"
+	Sell OrderSide = "Sell"
+)
+
+// ToString changes the ordertype to the exchange standard and returns a string
+func (o OrderSide) ToString() string {
+	return fmt.Sprintf("%v", o)
+}
+
 // AccountInfo is a Generic type to hold each exchange's holdings in
 // all enabled currencies
 type AccountInfo struct {
@@ -141,7 +176,7 @@ type TradeHistory struct {
 // OrderDetail holds order detail data
 type OrderDetail struct {
 	Exchange      string
-	ID            int64
+	ID            string
 	BaseCurrency  string
 	QuoteCurrency string
 	OrderSide     string
@@ -180,36 +215,90 @@ type FundHistory struct {
 	BankFrom          string
 }
 
+// AuthenticatedAPICredentials stores the API credentials
+type AuthenticatedAPICredentials struct {
+	APIKey             string
+	APIPEMKey          string
+	APISecret          string
+	Base64DecodeSecret bool
+}
+
+// AuthenticatedAPIValidator validates the supplied
+// API credentials
+type AuthenticatedAPIValidator struct {
+	RequiresClientID bool
+	RequiresPEMKey   bool
+	RequiresAPIKey   bool
+}
+
+// Features stores the supported and enabled features
+// for the exchange
+type Features struct {
+	Supports FeaturesSupported
+	Enabled  FeaturesEnabled
+}
+
+// FeaturesEnabled stores the exchange enabled features
+type FeaturesEnabled struct {
+	AutoPairUpdates bool
+}
+
+// FeaturesSupported stores the exchange supported features
+type FeaturesSupported struct {
+	REST               bool
+	Websocket          bool
+	AutoPairUpdates    bool
+	RESTTickerBatching bool
+}
+
+// API stores the exchange API settings
+type API struct {
+	AuthenticatedSupport bool
+	PEMKeySupport        bool
+
+	Endpoints struct {
+		URL                 string
+		URLDefault          string
+		URLSecondary        string
+		URLSecondaryDefault string
+		WebsocketURL        string
+	}
+
+	Credentials struct {
+		Key      string
+		Secret   string
+		ClientID string
+		PEMKey   string
+	}
+
+	CredentialsValidator struct {
+		// For Huobi (optional)
+		RequiresPEM bool
+
+		RequiresClientID           bool
+		RequiresBase64DecodeSecret bool
+	}
+}
+
 // Base stores the individual exchange information
 type Base struct {
-	Name                                       string
-	Enabled                                    bool
-	Verbose                                    bool
-	RESTPollingDelay                           time.Duration
-	AuthenticatedAPISupport                    bool
-	APIWithdrawPermissions                     uint32
-	APIAuthPEMKeySupport                       bool
-	APISecret, APIKey, APIAuthPEMKey, ClientID string
-	Nonce                                      nonce.Nonce
-	TakerFee, MakerFee, Fee                    float64
-	BaseCurrencies                             []string
-	AvailablePairs                             []string
-	EnabledPairs                               []string
-	AssetTypes                                 []string
-	PairsLastUpdated                           int64
-	SupportsAutoPairUpdating                   bool
-	SupportsRESTTickerBatching                 bool
-	SupportsWebsocketAPI                       bool
-	SupportsRESTAPI                            bool
-	HTTPTimeout                                time.Duration
-	HTTPUserAgent                              string
-	WebsocketURL                               string
-	APIUrl                                     string
-	APIUrlDefault                              string
-	APIUrlSecondary                            string
-	APIUrlSecondaryDefault                     string
-	RequestCurrencyPairFormat                  config.CurrencyPairFormatConfig
-	ConfigCurrencyPairFormat                   config.CurrencyPairFormatConfig
-	Websocket                                  *Websocket
+	Name                      string
+	Enabled                   bool
+	Verbose                   bool
+	APIWithdrawPermissions    uint32
+	API                       API
+	Nonce                     nonce.Nonce
+	BaseCurrencies            []string
+	AvailablePairs            []string
+	EnabledPairs              []string
+	AssetTypes                assets.AssetTypes
+	PairsLastUpdated          int64
+	Features                  Features
+	HTTPTimeout               time.Duration
+	HTTPUserAgent             string
+	WebsocketURL              string
+	RequestCurrencyPairFormat config.CurrencyPairFormatConfig
+	ConfigCurrencyPairFormat  config.CurrencyPairFormatConfig
+	Websocket                 *Websocket
 	*request.Requester
 }

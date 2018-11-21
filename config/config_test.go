@@ -391,7 +391,7 @@ func TestGetEnabledExchanges(t *testing.T) {
 	}
 
 	exchanges := cfg.GetEnabledExchanges()
-	if len(exchanges) != 30 {
+	if len(exchanges) != 29 {
 		t.Error(
 			"Test failed. TestGetEnabledExchanges. Enabled exchanges value mismatch",
 		)
@@ -443,7 +443,7 @@ func TestGetDisabledExchanges(t *testing.T) {
 }
 
 func TestCountEnabledExchanges(t *testing.T) {
-	defaultEnabledExchanges := 30
+	defaultEnabledExchanges := 29
 	GetConfigEnabledExchanges := GetConfig()
 	err := GetConfigEnabledExchanges.LoadConfig(ConfigTestFile)
 	if err != nil {
@@ -601,7 +601,7 @@ func TestUpdateExchangeConfig(t *testing.T) {
 			"Test failed. UpdateExchangeConfig.GetExchangeConfig: %s", err.Error(),
 		)
 	}
-	e.APIKey = "test1234"
+	e.API.Credentials.Key = "test1234"
 	err3 := UpdateExchangeConfig.UpdateExchangeConfig(e)
 	if err3 != nil {
 		t.Errorf(
@@ -638,9 +638,9 @@ func TestCheckExchangeConfigValues(t *testing.T) {
 		t.Fatalf("Test failed. Expected exchange %s to have updated HTTPTimeout value", checkExchangeConfigValues.Exchanges[0].Name)
 	}
 
-	checkExchangeConfigValues.Exchanges[0].APIKey = "Key"
-	checkExchangeConfigValues.Exchanges[0].APISecret = "Secret"
-	checkExchangeConfigValues.Exchanges[0].AuthenticatedAPISupport = true
+	checkExchangeConfigValues.Exchanges[0].API.Credentials.Key = "Key"
+	checkExchangeConfigValues.Exchanges[0].API.Credentials.Secret = "Secret"
+	checkExchangeConfigValues.Exchanges[0].API.AuthenticatedSupport = true
 	err = checkExchangeConfigValues.CheckExchangeConfigValues()
 	if err != nil {
 		t.Errorf(
@@ -648,9 +648,9 @@ func TestCheckExchangeConfigValues(t *testing.T) {
 		)
 	}
 
-	checkExchangeConfigValues.Exchanges[0].AuthenticatedAPISupport = true
-	checkExchangeConfigValues.Exchanges[0].APIKey = "TESTYTEST"
-	checkExchangeConfigValues.Exchanges[0].APISecret = "TESTYTEST"
+	checkExchangeConfigValues.Exchanges[0].API.AuthenticatedSupport = true
+	checkExchangeConfigValues.Exchanges[0].API.Credentials.Key = "TESTYTEST"
+	checkExchangeConfigValues.Exchanges[0].API.Credentials.Secret = "TESTYTEST"
 	checkExchangeConfigValues.Exchanges[0].Name = "ITBIT"
 	err = checkExchangeConfigValues.CheckExchangeConfigValues()
 	if err != nil {

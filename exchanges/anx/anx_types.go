@@ -1,6 +1,8 @@
 package anx
 
-import "github.com/thrasher-/gocryptotrader/currency/symbol"
+import (
+	"github.com/thrasher-/gocryptotrader/currency/symbol"
+)
 
 // Currency holds the currency information
 type Currency struct {

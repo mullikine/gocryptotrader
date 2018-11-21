@@ -4,14 +4,63 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets default values for the exchange
+func (b *BTCC) SetDefaults() {
+	b.Name = "BTCC"
+	b.Enabled = true
+	b.Verbose = true
+	b.APIWithdrawPermissions = exchange.NoAPIWithdrawalMethods
+	b.RequestCurrencyPairFormat.Uppercase = true
+	b.ConfigCurrencyPairFormat.Uppercase = true
+	b.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	b.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    false,
+			RESTTickerBatching: false,
+			REST:               false,
+			Websocket:          true,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: false,
+		},
+	}
+	b.Requester = request.New(b.Name,
+		request.NewRateLimit(time.Second, btccAuthRate),
+		request.NewRateLimit(time.Second, btccUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	b.WebsocketInit()
+}
+
+// Setup is run on startup to setup exchange with config values
+func (b *BTCC) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		b.SetEnabled(false)
+		return nil
+	}
+
+	err := b.SetupDefaults(exch)
+	if err != nil {
+		return err
+	}
+
+	return b.WebsocketSetup(b.WsConnect,
+		exch.Name,
+		exch.Features.Enabled.Websocket,
+		btccSocketioAddress,
+		exch.API.Endpoints.WebsocketURL)
+}
 
 // Start starts the BTCC go routine
 func (b *BTCC) Start(wg *sync.WaitGroup) {
@@ -26,7 +75,6 @@ func (b *BTCC) Start(wg *sync.WaitGroup) {
 func (b *BTCC) Run() {
 	if b.Verbose {
 		log.Printf("%s Websocket: %s.", b.GetName(), common.IsEnabled(b.Websocket.IsEnabled()))
-		log.Printf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
 	}
 
@@ -45,12 +93,12 @@ func (b *BTCC) Run() {
 		exchCfg.EnabledPairs = pairs[0]
 		b.BaseCurrencies = []string{"USD"}
 
-		err = b.UpdateCurrencies(pairs, false, true)
+		err = b.UpdatePairs(pairs, false, true)
 		if err != nil {
 			log.Printf("%s failed to update available currencies. %s\n", b.Name, err)
 		}
 
-		err = b.UpdateCurrencies(pairs, true, true)
+		err = b.UpdatePairs(pairs, true, true)
 		if err != nil {
 			log.Printf("%s failed to update enabled currencies. %s\n", b.Name, err)
 		}
@@ -63,8 +111,19 @@ func (b *BTCC) Run() {
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (b *BTCC) FetchTradablePairs() ([]string, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (b *BTCC) UpdateTradablePairs(forceUpdate bool) error {
+	return common.ErrFunctionNotSupported
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (b *BTCC) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *BTCC) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	// var tickerPrice ticker.Price
 	// tick, err := b.GetTicker(exchange.FormatExchangeCurrency(b.GetName(), p).String())
 	// if err != nil {
@@ -83,7 +142,7 @@ func (b *BTCC) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (b *BTCC) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *BTCC) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	// tickerNew, err := ticker.GetTicker(b.GetName(), p, assetType)
 	// if err != nil {
 	// 	return b.UpdateTicker(p, assetType)
@@ -93,7 +152,7 @@ func (b *BTCC) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price,
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (b *BTCC) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *BTCC) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	// ob, err := orderbook.GetOrderbook(b.GetName(), p, assetType)
 	// if err != nil {
 	// 	return b.UpdateOrderbook(p, assetType)
@@ -103,7 +162,7 @@ func (b *BTCC) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (b *BTCC) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *BTCC) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	// var orderBook orderbook.Base
 	// orderbookNew, err := b.GetOrderBook(exchange.FormatExchangeCurrency(b.GetName(), p).String(), 100)
 	// if err != nil {
@@ -143,7 +202,7 @@ func (b *BTCC) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (b *BTCC) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (b *BTCC) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	// var resp []exchange.TradeHistory
 
 	// return resp, common.ErrNotYetImplemented

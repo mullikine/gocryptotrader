@@ -4,13 +4,59 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets the basic defaults for Bitflyer
+func (b *Bitflyer) SetDefaults() {
+	b.Name = "Bitflyer"
+	b.Enabled = true
+	b.Verbose = true
+	b.APIWithdrawPermissions = exchange.WithdrawCryptoViaWebsiteOnly | exchange.AutoWithdrawFiat
+	b.RequestCurrencyPairFormat.Delimiter = "_"
+	b.RequestCurrencyPairFormat.Uppercase = true
+	b.ConfigCurrencyPairFormat.Delimiter = "_"
+	b.ConfigCurrencyPairFormat.Uppercase = true
+	b.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	b.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    false,
+			RESTTickerBatching: false,
+			REST:               true,
+			Websocket:          false,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: false,
+		},
+	}
+	b.Requester = request.New(b.Name,
+		request.NewRateLimit(time.Minute, bitflyerAuthRate),
+		request.NewRateLimit(time.Minute, bitflyerUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	b.API.Endpoints.URLDefault = japanURL
+	b.API.Endpoints.URL = b.API.Endpoints.URLDefault
+	b.API.Endpoints.URLSecondaryDefault = chainAnalysis
+	b.API.Endpoints.URLSecondary = b.API.Endpoints.URLSecondaryDefault
+}
+
+// Setup takes in the supplied exchange configuration details and sets params
+func (b *Bitflyer) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		b.SetEnabled(false)
+		return nil
+	}
+
+	return b.SetupDefaults(exch)
+}
 
 // Start starts the Bitflyer go routine
 func (b *Bitflyer) Start(wg *sync.WaitGroup) {
@@ -24,8 +70,11 @@ func (b *Bitflyer) Start(wg *sync.WaitGroup) {
 // Run implements the Bitflyer wrapper
 func (b *Bitflyer) Run() {
 	if b.Verbose {
-		log.Printf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
+	}
+
+	if !b.GetEnabledFeatures().AutoPairUpdates {
+		return
 	}
 
 	/*
@@ -47,8 +96,19 @@ func (b *Bitflyer) Run() {
 	*/
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (b *Bitflyer) FetchTradablePairs() ([]string, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (b *Bitflyer) UpdateTradablePairs(forceUpdate bool) error {
+	return common.ErrFunctionNotSupported
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (b *Bitflyer) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *Bitflyer) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 
 	p = b.CheckFXString(p)
@@ -70,8 +130,8 @@ func (b *Bitflyer) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.P
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (b *Bitflyer) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
-	tick, err := ticker.GetTicker(b.GetName(), p, ticker.Spot)
+func (b *Bitflyer) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
+	tick, err := ticker.GetTicker(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateTicker(p, assetType)
 	}
@@ -88,7 +148,7 @@ func (b *Bitflyer) CheckFXString(p pair.CurrencyPair) pair.CurrencyPair {
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (b *Bitflyer) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitflyer) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateOrderbook(p, assetType)
@@ -97,7 +157,7 @@ func (b *Bitflyer) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderb
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (b *Bitflyer) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitflyer) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 
 	p = b.CheckFXString(p)
@@ -145,7 +205,7 @@ func (b *Bitflyer) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (b *Bitflyer) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (b *Bitflyer) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

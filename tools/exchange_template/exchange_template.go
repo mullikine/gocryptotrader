@@ -117,9 +117,8 @@ func main() {
 	newExchConfig := config.ExchangeConfig{}
 	newExchConfig.Name = capName
 	newExchConfig.Enabled = true
-	newExchConfig.RESTPollingDelay = 10
-	newExchConfig.APIKey = "Key"
-	newExchConfig.APISecret = "Secret"
+	newExchConfig.API.Credentials.Key = "Key"
+	newExchConfig.API.Credentials.Secret = "Secret"
 	newExchConfig.AssetTypes = "SPOT"
 
 	configTestFile.Exchanges = append(configTestFile.Exchanges, newExchConfig)

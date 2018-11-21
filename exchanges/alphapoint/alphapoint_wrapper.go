@@ -4,13 +4,52 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets current default settings
+func (a *Alphapoint) SetDefaults() {
+	a.Enabled = true
+	a.Verbose = true
+	a.API.Endpoints.URL = alphapointDefaultAPIURL
+	a.WebsocketURL = alphapointDefaultWebsocketURL
+	a.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	a.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    false,
+			RESTTickerBatching: false,
+			REST:               true,
+			Websocket:          true,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: false,
+		},
+	}
+	a.APIWithdrawPermissions = exchange.WithdrawCryptoWith2FA | exchange.AutoWithdrawCryptoWithAPIPermission
+	a.Requester = request.New(a.Name,
+		request.NewRateLimit(time.Minute*10, alphapointAuthRate),
+		request.NewRateLimit(time.Minute*10, alphapointUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+}
+
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (a *Alphapoint) FetchTradablePairs() ([]string, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (a *Alphapoint) UpdateTradablePairs(forceUpdate bool) error {
+	return common.ErrFunctionNotSupported
+}
 
 // GetAccountInfo retrieves balances for all enabled currencies on the
 // Alphapoint exchange
@@ -33,7 +72,7 @@ func (a *Alphapoint) GetAccountInfo() (exchange.AccountInfo, error) {
 }
 
 // UpdateTicker updates and returns the ticker for a currency pair
-func (a *Alphapoint) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (a *Alphapoint) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := a.GetTicker(p.Pair().String())
 	if err != nil {
@@ -52,7 +91,7 @@ func (a *Alphapoint) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (a *Alphapoint) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (a *Alphapoint) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tick, err := ticker.GetTicker(a.GetName(), p, assetType)
 	if err != nil {
 		return a.UpdateTicker(p, assetType)
@@ -61,7 +100,7 @@ func (a *Alphapoint) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (a *Alphapoint) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (a *Alphapoint) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := a.GetOrderbook(p.Pair().String())
 	if err != nil {
@@ -83,7 +122,7 @@ func (a *Alphapoint) UpdateOrderbook(p pair.CurrencyPair, assetType string) (ord
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (a *Alphapoint) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (a *Alphapoint) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(a.GetName(), p, assetType)
 	if err != nil {
 		return a.UpdateOrderbook(p, assetType)
@@ -99,7 +138,7 @@ func (a *Alphapoint) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (a *Alphapoint) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (a *Alphapoint) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

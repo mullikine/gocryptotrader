@@ -32,9 +32,9 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - bitflyer Setup() init error")
 	}
 
-	bitflyerConfig.AuthenticatedAPISupport = true
-	bitflyerConfig.APIKey = testAPIKey
-	bitflyerConfig.APISecret = testAPISecret
+	bitflyerConfig.API.AuthenticatedSupport = true
+	bitflyerConfig.API.Credentials.Key = testAPIKey
+	bitflyerConfig.API.Credentials.Secret = testAPISecret
 
 	b.Setup(bitflyerConfig)
 }
@@ -135,7 +135,7 @@ func TestFetchTicker(t *testing.T) {
 	t.Parallel()
 	var p pair.CurrencyPair
 
-	currencies := b.GetAvailableCurrencies()
+	currencies := b.GetAvailablePairs()
 	for _, pair := range currencies {
 		if pair.Pair().String() == "FXBTC_JPY" {
 			p = pair
@@ -251,9 +251,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func isRealOrderTestEnabled() bool {
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !b.ValidateAPICredentials() || !canManipulateRealOrders {
 		return false
 	}
 	return true
@@ -266,11 +264,13 @@ func TestSubmitOrder(t *testing.T) {
 	if !isRealOrderTestEnabled() {
 		t.Skip()
 	}
+
 	var p = pair.CurrencyPair{
 		Delimiter:      "",
 		FirstCurrency:  symbol.LTC,
 		SecondCurrency: symbol.BTC,
 	}
+
 	response, err := b.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 1, "clientId")
 	if err != nil || !response.IsOrderPlaced {
 		t.Errorf("Order failed to be placed: %v", err)

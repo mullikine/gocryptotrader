@@ -67,7 +67,7 @@ func (p *Poloniex) WsSubscribe() error {
 		return err
 	}
 
-	pairs := p.GetEnabledCurrencies()
+	pairs := p.GetEnabledPairs()
 	for _, nextPair := range pairs {
 		fPair := exchange.FormatExchangeCurrency(p.GetName(), nextPair)
 

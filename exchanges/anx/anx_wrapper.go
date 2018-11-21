@@ -4,13 +4,57 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets current default settings
+func (a *ANX) SetDefaults() {
+	a.Name = "ANX"
+	a.Enabled = true
+	a.Verbose = true
+	a.RequestCurrencyPairFormat.Uppercase = true
+	a.ConfigCurrencyPairFormat.Delimiter = "_"
+	a.ConfigCurrencyPairFormat.Uppercase = true
+	a.APIWithdrawPermissions = exchange.WithdrawCryptoWithEmail | exchange.AutoWithdrawCryptoWithSetup |
+		exchange.WithdrawCryptoWith2FA | exchange.WithdrawFiatViaWebsiteOnly
+	a.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	a.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    true,
+			RESTTickerBatching: false,
+			REST:               true,
+			Websocket:          false,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+	a.Requester = request.New(a.Name,
+		request.NewRateLimit(time.Second, anxAuthRate),
+		request.NewRateLimit(time.Second, anxUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	a.API.Endpoints.URLDefault = anxAPIURL
+	a.API.Endpoints.URL = a.API.Endpoints.URLDefault
+}
+
+//Setup is run on startup to setup exchange with config values
+func (a *ANX) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		a.SetEnabled(false)
+		return nil
+	}
+
+	return a.SetupDefaults(exch)
+}
 
 // Start starts the ANX go routine
 func (a *ANX) Start(wg *sync.WaitGroup) {
@@ -24,37 +68,45 @@ func (a *ANX) Start(wg *sync.WaitGroup) {
 // Run implements the ANX wrapper
 func (a *ANX) Run() {
 	if a.Verbose {
-		log.Printf("%s polling delay: %ds.\n", a.GetName(), a.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", a.GetName(), len(a.EnabledPairs), a.EnabledPairs)
 	}
 
-	exchangeProducts, err := a.GetTradablePairs()
-	if err != nil {
-		log.Printf("%s Failed to get available symbols.\n", a.GetName())
-	} else {
-		forceUpgrade := false
-		if !common.StringDataContains(a.EnabledPairs, "_") || !common.StringDataContains(a.AvailablePairs, "_") {
-			forceUpgrade = true
-		}
+	forceUpdate := false
+	if !common.StringDataContains(a.EnabledPairs, "_") || !common.StringDataContains(a.AvailablePairs, "_") {
+		enabledPairs := []string{"BTC_USD,BTC_HKD,BTC_EUR,BTC_CAD,BTC_AUD,BTC_SGD,BTC_JPY,BTC_GBP,BTC_NZD,LTC_BTC,DOG_EBTC,STR_BTC,XRP_BTC"}
+		log.Println("WARNING: Enabled pairs for ANX reset due to config upgrade, please enable the ones you would like again.")
 
-		if forceUpgrade {
-			enabledPairs := []string{"BTC_USD,BTC_HKD,BTC_EUR,BTC_CAD,BTC_AUD,BTC_SGD,BTC_JPY,BTC_GBP,BTC_NZD,LTC_BTC,DOG_EBTC,STR_BTC,XRP_BTC"}
-			log.Println("WARNING: Enabled pairs for ANX reset due to config upgrade, please enable the ones you would like again.")
-
-			err = a.UpdateCurrencies(enabledPairs, true, true)
-			if err != nil {
-				log.Printf("%s Failed to get config.\n", a.GetName())
-			}
-		}
-		err = a.UpdateCurrencies(exchangeProducts, false, forceUpgrade)
+		forceUpdate = true
+		err := a.UpdatePairs(enabledPairs, true, true)
 		if err != nil {
-			log.Printf("%s Failed to get config.\n", a.GetName())
+			log.Printf("%s failed to update currencies.\n", a.GetName())
+			return
 		}
+	}
+
+	if !a.GetEnabledFeatures().AutoPairUpdates && !forceUpdate {
+		return
+	}
+
+	err := a.UpdateTradablePairs(forceUpdate)
+	if err != nil {
+		log.Printf("%s failed to update tradable pairs. Err: %s", a.GetName(), err)
 	}
 }
 
-// GetTradablePairs returns a list of available
-func (a *ANX) GetTradablePairs() ([]string, error) {
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (a *ANX) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := a.FetchTradablePairs()
+	if err != nil {
+		return err
+	}
+
+	return a.UpdatePairs(pairs, false, forceUpdate)
+}
+
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (a *ANX) FetchTradablePairs() ([]string, error) {
 	result, err := a.GetCurrencies()
 	if err != nil {
 		return nil, err
@@ -69,7 +121,7 @@ func (a *ANX) GetTradablePairs() ([]string, error) {
 }
 
 // UpdateTicker updates and returns the ticker for a currency pair
-func (a *ANX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (a *ANX) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := a.GetTicker(exchange.FormatExchangeCurrency(a.GetName(), p).String())
 	if err != nil {
@@ -136,7 +188,7 @@ func (a *ANX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price,
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (a *ANX) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (a *ANX) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(a.GetName(), p, assetType)
 	if err != nil {
 		return a.UpdateTicker(p, assetType)
@@ -145,7 +197,7 @@ func (a *ANX) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, 
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (a *ANX) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (a *ANX) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(a.GetName(), p, assetType)
 	if err != nil {
 		return a.UpdateOrderbook(p, assetType)
@@ -154,7 +206,7 @@ func (a *ANX) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.B
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (a *ANX) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (a *ANX) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := a.GetDepth(exchange.FormatExchangeCurrency(a.GetName(), p).String())
 	if err != nil {
@@ -188,7 +240,7 @@ func (a *ANX) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (a *ANX) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (a *ANX) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

@@ -6,13 +6,54 @@ import (
 	"log"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets the package defaults for localbitcoins
+func (l *LocalBitcoins) SetDefaults() {
+	l.Name = "LocalBitcoins"
+	l.Enabled = true
+	l.Verbose = true
+	l.APIWithdrawPermissions = exchange.WithdrawCryptoViaWebsiteOnly
+	l.RequestCurrencyPairFormat.Uppercase = true
+	l.ConfigCurrencyPairFormat.Uppercase = true
+	l.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    true,
+			RESTTickerBatching: true,
+			REST:               true,
+			Websocket:          false,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+	l.Requester = request.New(l.Name,
+		request.NewRateLimit(time.Second*0, localbitcoinsAuthRate),
+		request.NewRateLimit(time.Second*0, localbitcoinsUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	l.API.Endpoints.URLDefault = localbitcoinsAPIURL
+	l.API.Endpoints.URL = l.API.Endpoints.URLDefault
+}
+
+// Setup sets exchange configuration parameters
+func (l *LocalBitcoins) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		l.SetEnabled(false)
+		return nil
+	}
+
+	return l.SetupDefaults(exch)
+}
 
 // Start starts the LocalBitcoins go routine
 func (l *LocalBitcoins) Start(wg *sync.WaitGroup) {
@@ -26,14 +67,24 @@ func (l *LocalBitcoins) Start(wg *sync.WaitGroup) {
 // Run implements the LocalBitcoins wrapper
 func (l *LocalBitcoins) Run() {
 	if l.Verbose {
-		log.Printf("%s polling delay: %ds.\n", l.GetName(), l.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", l.GetName(), len(l.EnabledPairs), l.EnabledPairs)
 	}
 
+	if !l.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
+
+	err := l.UpdateTradablePairs(false)
+	if err != nil {
+		log.Printf("%s failed to update tradable pairs. Err: %s", l.Name, err)
+	}
+}
+
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (l *LocalBitcoins) FetchTradablePairs() ([]string, error) {
 	currencies, err := l.GetTradableCurrencies()
 	if err != nil {
-		log.Printf("%s failed to obtain available tradable currencies. Err: %s", l.Name, err)
-		return
+		return nil, err
 	}
 
 	var pairs []string
@@ -41,22 +92,29 @@ func (l *LocalBitcoins) Run() {
 		pairs = append(pairs, "BTC"+currencies[x])
 	}
 
-	err = l.UpdateCurrencies(pairs, false, false)
+	return pairs, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (l *LocalBitcoins) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := l.FetchTradablePairs()
 	if err != nil {
-		log.Printf("%s failed to update available currencies. Err %s", l.Name, err)
+		return err
 	}
 
+	return l.UpdatePairs(pairs, false, forceUpdate)
 }
 
 // UpdateTicker updates and returns the ticker for a currency pair
-func (l *LocalBitcoins) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (l *LocalBitcoins) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := l.GetTicker()
 	if err != nil {
 		return tickerPrice, err
 	}
 
-	for _, x := range l.GetEnabledCurrencies() {
+	for _, x := range l.GetEnabledPairs() {
 		currency := x.SecondCurrency.String()
 		var tp ticker.Price
 		tp.Pair = x
@@ -69,7 +127,7 @@ func (l *LocalBitcoins) UpdateTicker(p pair.CurrencyPair, assetType string) (tic
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (l *LocalBitcoins) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (l *LocalBitcoins) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(l.GetName(), p, assetType)
 	if err != nil {
 		return l.UpdateTicker(p, assetType)
@@ -78,7 +136,7 @@ func (l *LocalBitcoins) FetchTicker(p pair.CurrencyPair, assetType string) (tick
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (l *LocalBitcoins) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (l *LocalBitcoins) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(l.GetName(), p, assetType)
 	if err != nil {
 		return l.UpdateOrderbook(p, assetType)
@@ -87,7 +145,7 @@ func (l *LocalBitcoins) FetchOrderbook(p pair.CurrencyPair, assetType string) (o
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (l *LocalBitcoins) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (l *LocalBitcoins) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := l.GetOrderbook(p.SecondCurrency.String())
 	if err != nil {
@@ -133,7 +191,7 @@ func (l *LocalBitcoins) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (l *LocalBitcoins) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (l *LocalBitcoins) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

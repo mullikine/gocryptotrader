@@ -6,15 +6,57 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
 
-// Start starts the OKEX go routine
+// SetDefaults sets default values for the exchange
+func (h *HUOBIHADAX) SetDefaults() {
+	h.Name = "HuobiHadax"
+	h.Enabled = true
+	h.Verbose = true
+	h.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithSetup
+	h.ConfigCurrencyPairFormat.Delimiter = "-"
+	h.ConfigCurrencyPairFormat.Uppercase = true
+	h.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	h.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    true,
+			RESTTickerBatching: false,
+			REST:               true,
+			Websocket:          false,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+	h.Requester = request.New(h.Name,
+		request.NewRateLimit(time.Second*10, huobihadaxAuthRate),
+		request.NewRateLimit(time.Second*10, huobihadaxUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	h.API.Endpoints.URLDefault = huobihadaxAPIURL
+	h.API.Endpoints.URL = h.API.Endpoints.URLDefault
+}
+
+// Setup sets user configuration
+func (h *HUOBIHADAX) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		h.SetEnabled(false)
+		return nil
+	}
+
+	return h.SetupDefaults(exch)
+}
+
+// Start starts the HUOBIHADAX go routine
 func (h *HUOBIHADAX) Start(wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
@@ -23,32 +65,50 @@ func (h *HUOBIHADAX) Start(wg *sync.WaitGroup) {
 	}()
 }
 
-// Run implements the OKEX wrapper
+// Run implements the HUOBIHADAX wrapper
 func (h *HUOBIHADAX) Run() {
 	if h.Verbose {
-		log.Printf("%s polling delay: %ds.\n", h.GetName(), h.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", h.GetName(), len(h.EnabledPairs), h.EnabledPairs)
 	}
 
-	exchangeProducts, err := h.GetSymbols()
-	if err != nil {
-		log.Printf("%s Failed to get available symbols.\n", h.GetName())
-	} else {
-		var currencies []string
-		for x := range exchangeProducts {
-			newCurrency := exchangeProducts[x].BaseCurrency + "-" + exchangeProducts[x].QuoteCurrency
-			currencies = append(currencies, newCurrency)
-		}
+	if !h.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
 
-		err = h.UpdateCurrencies(currencies, false, false)
-		if err != nil {
-			log.Printf("%s Failed to update available currencies.\n", h.GetName())
-		}
+	err := h.UpdateTradablePairs(false)
+	if err != nil {
+		log.Printf("%s failed to update tradable pairs. Err: %s", h.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (h *HUOBIHADAX) FetchTradablePairs() ([]string, error) {
+	symbols, err := h.GetSymbols()
+	if err != nil {
+		return nil, err
+	}
+
+	var pairs []string
+	for x := range symbols {
+		pairs = append(pairs, symbols[x].BaseCurrency+"-"+symbols[x].QuoteCurrency)
+	}
+
+	return pairs, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (h *HUOBIHADAX) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := h.FetchTradablePairs()
+	if err != nil {
+		return err
+	}
+
+	return h.UpdatePairs(pairs, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (h *HUOBIHADAX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (h *HUOBIHADAX) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := h.GetMarketDetailMerged(exchange.FormatExchangeCurrency(h.Name, p).String())
 	if err != nil {
@@ -74,7 +134,7 @@ func (h *HUOBIHADAX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (h *HUOBIHADAX) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (h *HUOBIHADAX) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(h.GetName(), p, assetType)
 	if err != nil {
 		return h.UpdateTicker(p, assetType)
@@ -83,7 +143,7 @@ func (h *HUOBIHADAX) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (h *HUOBIHADAX) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (h *HUOBIHADAX) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(h.GetName(), p, assetType)
 	if err != nil {
 		return h.UpdateOrderbook(p, assetType)
@@ -92,7 +152,7 @@ func (h *HUOBIHADAX) FetchOrderbook(p pair.CurrencyPair, assetType string) (orde
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (h *HUOBIHADAX) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (h *HUOBIHADAX) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := h.GetDepth(exchange.FormatExchangeCurrency(h.Name, p).String(), "step1")
 	if err != nil {
@@ -129,7 +189,7 @@ func (h *HUOBIHADAX) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (h *HUOBIHADAX) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (h *HUOBIHADAX) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

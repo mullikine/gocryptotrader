@@ -7,11 +7,64 @@ import (
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets the basic defaults for Bitmex
+func (b *Bitmex) SetDefaults() {
+	b.Name = "Bitmex"
+	b.Enabled = true
+	b.Verbose = true
+	b.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithAPIPermission | exchange.WithdrawCryptoWithEmail | exchange.WithdrawCryptoWith2FA
+	b.RequestCurrencyPairFormat.Uppercase = true
+	b.RequestCurrencyPairFormat.Delimiter = ""
+	b.ConfigCurrencyPairFormat.Delimiter = ""
+	b.ConfigCurrencyPairFormat.Uppercase = true
+	b.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	b.Requester = request.New(b.Name,
+		request.NewRateLimit(time.Second, bitmexAuthRate),
+		request.NewRateLimit(time.Second, bitmexUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	b.API.Endpoints.URLDefault = bitmexAPIURL
+	b.API.Endpoints.URL = b.API.Endpoints.URLDefault
+	b.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    true,
+			RESTTickerBatching: false,
+			REST:               true,
+			Websocket:          true,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+	b.WebsocketInit()
+}
+
+// Setup takes in the supplied exchange configuration details and sets params
+func (b *Bitmex) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		b.SetEnabled(false)
+		return nil
+	}
+
+	err := b.SetupDefaults(exch)
+	if err != nil {
+		return err
+	}
+
+	return b.WebsocketSetup(b.WsConnector,
+		exch.Name,
+		exch.Features.Enabled.Websocket,
+		bitmexWSURL,
+		exch.API.Endpoints.WebsocketURL)
+}
 
 // Start starts the Bitmex go routine
 func (b *Bitmex) Start(wg *sync.WaitGroup) {
@@ -26,29 +79,47 @@ func (b *Bitmex) Start(wg *sync.WaitGroup) {
 func (b *Bitmex) Run() {
 	if b.Verbose {
 		log.Printf("%s Websocket: %s. (url: %s).\n", b.GetName(), common.IsEnabled(b.Websocket.IsEnabled()), b.WebsocketURL)
-		log.Printf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
 	}
 
-	marketInfo, err := b.GetActiveInstruments(GenericRequestParams{})
+	if !b.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
+
+	err := b.UpdateTradablePairs(false)
 	if err != nil {
-		log.Printf("%s Failed to get available symbols.\n", b.GetName())
-
-	} else {
-		var exchangeProducts []string
-		for _, info := range marketInfo {
-			exchangeProducts = append(exchangeProducts, info.Symbol)
-		}
-
-		err = b.UpdateCurrencies(exchangeProducts, false, false)
-		if err != nil {
-			log.Printf("%s Failed to update available currencies.\n", b.GetName())
-		}
+		log.Printf("%s failed to update tradable pairs. Err: %s", b.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (b *Bitmex) FetchTradablePairs() ([]string, error) {
+	marketInfo, err := b.GetActiveInstruments(GenericRequestParams{})
+	if err != nil {
+		return nil, err
+	}
+
+	var products []string
+	for x := range marketInfo {
+		products = append(products, marketInfo[x].Symbol)
+	}
+
+	return products, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (b *Bitmex) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := b.FetchTradablePairs()
+	if err != nil {
+		return err
+	}
+
+	return b.UpdatePairs(pairs, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (b *Bitmex) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *Bitmex) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	currency := exchange.FormatExchangeCurrency(b.Name, p)
 
@@ -77,7 +148,7 @@ func (b *Bitmex) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Pri
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (b *Bitmex) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *Bitmex) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateTicker(p, assetType)
@@ -86,7 +157,7 @@ func (b *Bitmex) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Pric
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (b *Bitmex) FetchOrderbook(currency pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitmex) FetchOrderbook(currency pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(b.GetName(), currency, assetType)
 	if err != nil {
 		return b.UpdateOrderbook(currency, assetType)
@@ -95,7 +166,7 @@ func (b *Bitmex) FetchOrderbook(currency pair.CurrencyPair, assetType string) (o
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (b *Bitmex) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitmex) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 
 	orderbookNew, err := b.GetOrderbook(OrderBookGetL2Params{
@@ -138,7 +209,7 @@ func (b *Bitmex) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (b *Bitmex) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (b *Bitmex) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

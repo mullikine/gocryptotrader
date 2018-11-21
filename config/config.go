@@ -31,7 +31,11 @@ const (
 	configFileEncryptionDisabled           = -1
 	configPairsLastUpdatedWarningThreshold = 30 // 30 days
 	configDefaultHTTPTimeout               = time.Duration(time.Second * 15)
-	configMaxAuthFailres                   = 3
+	configMaxAuthFailures                  = 3
+
+	DefaultAPIKey      = "Key"
+	DefaultAPISecret   = "Secret"
+	DefaultAPIClientID = "ClientID"
 )
 
 // Constants here hold some messages
@@ -358,7 +362,7 @@ func (c *Config) CheckPairConsistency(exchName string) error {
 
 	if len(pairs) == 0 {
 		exchCfg.EnabledPairs = pair.RandomPairFromPairs(availPairs).Pair().String()
-		log.Printf("Exchange %s: No enabled pairs found in available pairs, randomly added %v\n", exchName, exchCfg.EnabledPairs)
+		log.Printf("Exchange %s: No enabled pairs found in available pairs, randomly added %v pair.\n", exchName, exchCfg.EnabledPairs)
 	} else {
 		exchCfg.EnabledPairs = common.JoinStrings(pair.PairsToStringArray(pairs), ",")
 	}
@@ -368,7 +372,7 @@ func (c *Config) CheckPairConsistency(exchName string) error {
 		return err
 	}
 
-	log.Printf("Exchange %s: Removing enabled pair(s) %v from enabled pairs as it isn't an available pair", exchName, pair.PairsToStringArray(pairsRemoved))
+	log.Printf("Exchange %s: Removing enabled pair(s) %v from enabled pairs as it isn't an available pair.", exchName, pair.PairsToStringArray(pairsRemoved))
 	return nil
 }
 
@@ -478,7 +482,7 @@ func (c *Config) GetExchangeConfig(name string) (ExchangeConfig, error) {
 	m.Lock()
 	defer m.Unlock()
 	for i := range c.Exchanges {
-		if c.Exchanges[i].Name == name {
+		if common.StringToLower(c.Exchanges[i].Name) == common.StringToLower(name) {
 			return c.Exchanges[i], nil
 		}
 	}
@@ -514,7 +518,7 @@ func (c *Config) UpdateExchangeConfig(e ExchangeConfig) error {
 	m.Lock()
 	defer m.Unlock()
 	for i := range c.Exchanges {
-		if c.Exchanges[i].Name == e.Name {
+		if common.StringToLower(c.Exchanges[i].Name) == common.StringToLower(e.Name) {
 			c.Exchanges[i] = e
 			return nil
 		}
@@ -531,23 +535,75 @@ func (c *Config) CheckExchangeConfigValues() error {
 			c.Exchanges[i].Name = "CoinbasePro"
 		}
 
-		if exch.WebsocketURL != WebsocketURLNonDefaultMessage {
-			if exch.WebsocketURL == "" {
-				c.Exchanges[i].WebsocketURL = WebsocketURLNonDefaultMessage
+		// Check to see if the old API storage format is used
+		if exch.APIKey != nil {
+			// It is, migrate settings to new format
+			c.Exchanges[i].API.AuthenticatedSupport = *exch.AuthenticatedAPISupport
+			c.Exchanges[i].API.Credentials.Key = *exch.APIKey
+			c.Exchanges[i].API.Credentials.Secret = *exch.APISecret
+
+			if exch.APIAuthPEMKey != nil {
+				c.Exchanges[i].API.Credentials.PEMKey = *exch.APIAuthPEMKey
+			}
+
+			if exch.APIAuthPEMKeySupport != nil {
+				c.Exchanges[i].API.PEMKeySupport = *exch.APIAuthPEMKeySupport
+			}
+
+			if exch.ClientID != nil {
+				c.Exchanges[i].API.Credentials.ClientID = *exch.ClientID
+			}
+
+			if exch.WebsocketURL != nil {
+				c.Exchanges[i].API.Endpoints.WebsocketURL = *exch.WebsocketURL
+			}
+
+			c.Exchanges[i].API.Endpoints.URL = *exch.APIURL
+			c.Exchanges[i].API.Endpoints.URLSecondary = *exch.APIURLSecondary
+
+			// Flush settings
+			c.Exchanges[i].AuthenticatedAPISupport = nil
+			c.Exchanges[i].APIKey = nil
+			c.Exchanges[i].APIAuthPEMKey = nil
+			c.Exchanges[i].APISecret = nil
+			c.Exchanges[i].APIURL = nil
+			c.Exchanges[i].APIURLSecondary = nil
+			c.Exchanges[i].WebsocketURL = nil
+			c.Exchanges[i].ClientID = nil
+		}
+
+		if exch.Features == nil {
+			c.Exchanges[i].Features = &FeaturesConfig{}
+		}
+
+		if exch.SupportsAutoPairUpdates != nil {
+			c.Exchanges[i].Features.Supports.AutoPairUpdates = *exch.SupportsAutoPairUpdates
+			c.Exchanges[i].Features.Enabled.AutoPairUpdates = *exch.SupportsAutoPairUpdates
+			c.Exchanges[i].SupportsAutoPairUpdates = nil
+		}
+
+		if exch.Websocket != nil {
+			c.Exchanges[i].Features.Enabled.Websocket = *exch.Websocket
+			c.Exchanges[i].Websocket = nil
+		}
+
+		if exch.API.Endpoints.URL != APIURLNonDefaultMessage {
+			if exch.API.Endpoints.URL == "" {
+				// Set default if nothing set
+				c.Exchanges[i].API.Endpoints.URL = APIURLNonDefaultMessage
 			}
 		}
 
-		if exch.APIURL != APIURLNonDefaultMessage {
-			if exch.APIURL == "" {
+		if exch.API.Endpoints.URLSecondary != APIURLNonDefaultMessage {
+			if exch.API.Endpoints.URLSecondary == "" {
 				// Set default if nothing set
-				c.Exchanges[i].APIURL = APIURLNonDefaultMessage
+				c.Exchanges[i].API.Endpoints.URLSecondary = APIURLNonDefaultMessage
 			}
 		}
 
-		if exch.APIURLSecondary != APIURLNonDefaultMessage {
-			if exch.APIURLSecondary == "" {
-				// Set default if nothing set
-				c.Exchanges[i].APIURLSecondary = APIURLNonDefaultMessage
+		if exch.API.Endpoints.WebsocketURL != WebsocketURLNonDefaultMessage {
+			if exch.API.Endpoints.WebsocketURL == "" {
+				c.Exchanges[i].API.Endpoints.WebsocketURL = WebsocketURLNonDefaultMessage
 			}
 		}
 
@@ -564,25 +620,24 @@ func (c *Config) CheckExchangeConfigValues() error {
 			if exch.BaseCurrencies == "" {
 				return fmt.Errorf(ErrExchangeBaseCurrenciesEmpty, exch.Name)
 			}
-			if exch.AuthenticatedAPISupport { // non-fatal error
-				if exch.APIKey == "" || exch.APISecret == "" || exch.APIKey == "Key" || exch.APISecret == "Secret" {
-					c.Exchanges[i].AuthenticatedAPISupport = false
+			if c.Exchanges[i].API.AuthenticatedSupport { // non-fatal error
+				if c.Exchanges[i].API.Credentials.Key == "" || c.Exchanges[i].API.Credentials.Secret == "" || c.Exchanges[i].API.Credentials.Key == DefaultAPIKey || c.Exchanges[i].API.Credentials.Secret == DefaultAPISecret {
+					c.Exchanges[i].API.AuthenticatedSupport = false
 					log.Printf(WarningExchangeAuthAPIDefaultOrEmptyValues, exch.Name)
-				} else if exch.Name == "ITBIT" || exch.Name == "Bitstamp" || exch.Name == "COINUT" || exch.Name == "CoinbasePro" {
-					if exch.ClientID == "" || exch.ClientID == "ClientID" {
-						c.Exchanges[i].AuthenticatedAPISupport = false
-						log.Printf(WarningExchangeAuthAPIDefaultOrEmptyValues, exch.Name)
-					}
+				}
+
+				if c.Exchanges[i].API.CredentialsValidator.RequiresClientID && (c.Exchanges[i].API.Credentials.ClientID == DefaultAPIClientID || c.Exchanges[i].API.Credentials.ClientID == "") {
+					c.Exchanges[i].API.AuthenticatedSupport = false
+					log.Printf(WarningExchangeAuthAPIDefaultOrEmptyValues, exch.Name)
 				}
 			}
-			if !exch.SupportsAutoPairUpdates {
+			if !c.Exchanges[i].Features.Supports.AutoPairUpdates {
 				lastUpdated := common.UnixTimestampToTime(exch.PairsLastUpdated)
 				lastUpdated = lastUpdated.AddDate(0, 0, configPairsLastUpdatedWarningThreshold)
 				if lastUpdated.Unix() <= time.Now().Unix() {
 					log.Printf(WarningPairsLastUpdatedThresholdExceeded, exch.Name, configPairsLastUpdatedWarningThreshold)
 				}
 			}
-
 			if exch.HTTPTimeout <= 0 {
 				log.Printf("Exchange %s HTTP Timeout value not set, defaulting to %v.", exch.Name, configDefaultHTTPTimeout)
 				c.Exchanges[i].HTTPTimeout = configDefaultHTTPTimeout
@@ -941,7 +996,7 @@ func (c *Config) ReadConfig(configPath string) error {
 	} else {
 		errCounter := 0
 		for {
-			if errCounter >= configMaxAuthFailres {
+			if errCounter >= configMaxAuthFailures {
 				return errors.New("failed to decrypt config after 3 attempts")
 			}
 			key, err := PromptForConfigKey(IsInitialSetup)
@@ -962,7 +1017,7 @@ func (c *Config) ReadConfig(configPath string) error {
 
 			err = ConfirmConfigJSON(data, &c)
 			if err != nil {
-				if errCounter < configMaxAuthFailres {
+				if errCounter < configMaxAuthFailures {
 					log.Printf("Invalid password.")
 				}
 				errCounter++
@@ -1031,7 +1086,15 @@ func (c *Config) CheckConfig() error {
 		c.WebsocketServer.AdminUsername = c.RESTServer.AdminUsername
 		c.WebsocketServer.AdminPassword = c.RESTServer.AdminPassword
 		c.WebsocketServer.Enabled = c.RESTServer.Enabled
-		c.WebsocketServer.ListenAddress = c.Webserver.ListenAddress
+		c.WebsocketServer.WebsocketConnectionLimit = c.Webserver.WebsocketConnectionLimit
+		c.WebsocketServer.WebsocketMaxAuthFailures = c.Webserver.WebsocketMaxAuthFailures
+		c.WebsocketServer.WebsocketAllowInsecureOrigin = c.Webserver.WebsocketAllowInsecureOrigin
+
+		// Set listen address and ensure that we don't use a duplicate port
+		port := common.ExtractPort(c.Webserver.ListenAddress)
+		port++
+		newHost := common.SplitStrings(c.Webserver.ListenAddress, ":")[0] + ":" + strconv.Itoa(port)
+		c.WebsocketServer.ListenAddress = newHost
 
 		// Then flush the old webserver settings
 		c.Webserver = nil

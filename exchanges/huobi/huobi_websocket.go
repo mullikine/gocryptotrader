@@ -232,7 +232,7 @@ func (h *HUOBI) WsProcessOrderbook(ob WsDepth, symbol string) error {
 // WsSubscribe susbcribes to the current websocket streams based on the enabled
 // pair
 func (h *HUOBI) WsSubscribe() error {
-	pairs := h.GetEnabledCurrencies()
+	pairs := h.GetEnabledPairs()
 
 	for _, p := range pairs {
 		fPair := exchange.FormatExchangeCurrency(h.GetName(), p)

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
+
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
@@ -53,7 +55,7 @@ func printConvertCurrencyFormat(origCurrency string, origPrice float64) string {
 	)
 }
 
-func printTickerSummary(result ticker.Price, p pair.CurrencyPair, assetType, exchangeName string, err error) {
+func printTickerSummary(result ticker.Price, p pair.CurrencyPair, assetType assets.AssetType, exchangeName string, err error) {
 	if err != nil {
 		log.Printf("Failed to get %s %s ticker. Error: %s",
 			p.Pair().String(),
@@ -102,7 +104,7 @@ func printTickerSummary(result ticker.Price, p pair.CurrencyPair, assetType, exc
 	}
 }
 
-func printOrderbookSummary(result orderbook.Base, p pair.CurrencyPair, assetType, exchangeName string, err error) {
+func printOrderbookSummary(result orderbook.Base, p pair.CurrencyPair, assetType assets.AssetType, exchangeName string, err error) {
 	if err != nil {
 		log.Printf("Failed to get %s %s orderbook. Error: %s",
 			p.Pair().String(),
@@ -192,7 +194,7 @@ func TickerUpdaterRoutine() {
 				}
 
 				exchangeName := Bot.Exchanges[x].GetName()
-				enabledCurrencies := Bot.Exchanges[x].GetEnabledCurrencies()
+				enabledCurrencies := Bot.Exchanges[x].GetEnabledPairs()
 				supportsBatching := Bot.Exchanges[x].SupportsRESTTickerBatchUpdates()
 				assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
 				if err != nil {
@@ -201,7 +203,7 @@ func TickerUpdaterRoutine() {
 					return
 				}
 
-				processTicker := func(exch exchange.IBotExchange, update bool, c pair.CurrencyPair, assetType string) {
+				processTicker := func(exch exchange.IBotExchange, update bool, c pair.CurrencyPair, assetType assets.AssetType) {
 					var result ticker.Price
 					var err error
 					if update {
@@ -213,7 +215,7 @@ func TickerUpdaterRoutine() {
 					if err == nil {
 						Bot.CommsRelayer.StageTickerData(exchangeName, assetType, result)
 						if Bot.Config.WebsocketServer.Enabled {
-							relayWebsocketEvent(result, "ticker_update", assetType, exchangeName)
+							relayWebsocketEvent(result, "ticker_update", assetType.String(), exchangeName)
 						}
 					}
 				}
@@ -251,7 +253,7 @@ func OrderbookUpdaterRoutine() {
 				}
 
 				exchangeName := Bot.Exchanges[x].GetName()
-				enabledCurrencies := Bot.Exchanges[x].GetEnabledCurrencies()
+				enabledCurrencies := Bot.Exchanges[x].GetEnabledPairs()
 				assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
 				if err != nil {
 					log.Printf("failed to get %s exchange asset types. Error: %s",
@@ -259,13 +261,13 @@ func OrderbookUpdaterRoutine() {
 					return
 				}
 
-				processOrderbook := func(exch exchange.IBotExchange, c pair.CurrencyPair, assetType string) {
+				processOrderbook := func(exch exchange.IBotExchange, c pair.CurrencyPair, assetType assets.AssetType) {
 					result, err := exch.UpdateOrderbook(c, assetType)
 					printOrderbookSummary(result, c, assetType, exchangeName, err)
 					if err == nil {
 						Bot.CommsRelayer.StageOrderbookData(exchangeName, assetType, result)
 						if Bot.Config.WebsocketServer.Enabled {
-							relayWebsocketEvent(result, "orderbook_update", assetType, exchangeName)
+							relayWebsocketEvent(result, "orderbook_update", assetType.String(), exchangeName)
 						}
 					}
 				}
@@ -411,15 +413,27 @@ func WebsocketDataHandler(ws *exchange.Websocket) {
 
 			case exchange.TradeData:
 				// Trade Data
-				if Bot.Settings.Verbose {
-					log.Println("Websocket trades Updated:   ", data.(exchange.TradeData))
-				}
+				//if Bot.Settings.Verbose {
+				//	log.Println("Websocket trades Updated:   ", data.(exchange.TradeData))
+				//}
 
 			case exchange.TickerData:
 				// Ticker data
-				if Bot.Settings.Verbose {
-					log.Println("Websocket Ticker Updated:   ", data.(exchange.TickerData))
+				//if Bot.Settings.Verbose {
+				//	log.Println("Websocket Ticker Updated:   ", data.(exchange.TickerData))
+				//}
+
+				result := data.(exchange.TickerData)
+				tickerNew := ticker.Price{
+					Pair:         result.Pair,
+					LastUpdated:  result.Timestamp,
+					CurrencyPair: result.Pair.Pair().String(),
+					Last:         result.ClosePrice,
+					High:         result.HighPrice,
+					Low:          result.LowPrice,
+					Volume:       result.Quantity,
 				}
+				ticker.ProcessTicker(ws.GetName(), result.Pair, tickerNew, result.AssetType)
 			case exchange.KlineData:
 				// Kline data
 				if Bot.Settings.Verbose {
@@ -428,7 +442,10 @@ func WebsocketDataHandler(ws *exchange.Websocket) {
 			case exchange.WebsocketOrderbookUpdate:
 				// Orderbook data
 				if Bot.Settings.Verbose {
-					log.Println("Websocket Orderbook Updated:", data.(exchange.WebsocketOrderbookUpdate))
+					//result := data.(exchange.WebsocketOrderbookUpdate)
+
+					//log.Printf("Websocket %s %s orderbook updated", ws.GetName(), result.Pair.Pair().String())
+					//log.Println("Websocket Orderbook Updated:", data.(exchange.WebsocketOrderbookUpdate))
 				}
 			default:
 				if Bot.Settings.Verbose {

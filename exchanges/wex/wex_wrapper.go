@@ -5,13 +5,59 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 )
+
+// SetDefaults sets current default value for WEX
+func (w *WEX) SetDefaults() {
+	w.Name = "WEX"
+	w.Enabled = true
+	w.Verbose = true
+	w.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithAPIPermission
+	w.RequestCurrencyPairFormat.Delimiter = "_"
+	w.RequestCurrencyPairFormat.Separator = "-"
+	w.ConfigCurrencyPairFormat.Delimiter = "_"
+	w.ConfigCurrencyPairFormat.Uppercase = true
+	w.AssetTypes = assets.AssetTypes{assets.AssetTypeSpot}
+	w.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			AutoPairUpdates:    true,
+			RESTTickerBatching: true,
+			REST:               true,
+			Websocket:          false,
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+	w.Requester = request.New(w.Name,
+		request.NewRateLimit(time.Second, wexAuthRate),
+		request.NewRateLimit(time.Second, wexUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+	w.API.Endpoints.URLDefault = wexAPIPublicURL
+	w.API.Endpoints.URL = w.API.Endpoints.URLDefault
+	w.API.Endpoints.URLSecondaryDefault = wexAPIPrivateURL
+	w.API.Endpoints.URLSecondary = w.API.Endpoints.URLSecondaryDefault
+}
+
+// Setup sets exchange configuration parameters for WEX
+func (w *WEX) Setup(exch config.ExchangeConfig) error {
+	if !exch.Enabled {
+		w.SetEnabled(false)
+		return nil
+	}
+
+	return w.SetupDefaults(exch)
+}
 
 // Start starts the WEX go routine
 func (w *WEX) Start(wg *sync.WaitGroup) {
@@ -25,39 +71,61 @@ func (w *WEX) Start(wg *sync.WaitGroup) {
 // Run implements the WEX wrapper
 func (w *WEX) Run() {
 	if w.Verbose {
-		log.Printf("%s polling delay: %ds.\n", w.GetName(), w.RESTPollingDelay)
 		log.Printf("%s %d currencies enabled: %s.\n", w.GetName(), len(w.EnabledPairs), w.EnabledPairs)
 	}
 
-	exchangeProducts, err := w.GetTradablePairs()
-	if err != nil {
-		log.Printf("%s Failed to get available symbols.\n", w.GetName())
-	} else {
-		forceUpgrade := false
-		if !common.StringDataContains(w.EnabledPairs, "_") || !common.StringDataContains(w.AvailablePairs, "_") {
-			forceUpgrade = true
-		}
+	forceUpdate := false
+	if !common.StringDataContains(w.EnabledPairs, "_") || !common.StringDataContains(w.AvailablePairs, "_") {
+		enabledPairs := []string{"BTC_USD", "LTC_USD", "LTC_BTC", "ETH_USD"}
+		log.Println("WARNING: Enabled pairs for WEX reset due to config upgrade, please enable the ones you would like again.")
+		forceUpdate = true
 
-		if forceUpgrade {
-			enabledPairs := []string{"BTC_USD", "LTC_USD", "LTC_BTC", "ETH_USD"}
-			log.Println("WARNING: Enabled pairs for WEX reset due to config upgrade, please enable the ones you would like again.")
-
-			err = w.UpdateCurrencies(enabledPairs, true, true)
-			if err != nil {
-				log.Printf("%s Failed to get config.\n", w.GetName())
-			}
-		}
-		err = w.UpdateCurrencies(exchangeProducts, false, forceUpgrade)
+		err := w.UpdatePairs(enabledPairs, true, true)
 		if err != nil {
-			log.Printf("%s Failed to get config.\n", w.GetName())
+			log.Printf("%s failed to update currencies. Err: %s\n", w.Name, err)
 		}
+	}
+
+	if !w.GetEnabledFeatures().AutoPairUpdates && !forceUpdate {
+		return
+	}
+
+	err := w.UpdateTradablePairs(forceUpdate)
+	if err != nil {
+		log.Printf("%s failed to update tradable pairs. Err: %s", w.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (w *WEX) FetchTradablePairs() ([]string, error) {
+	info, err := w.GetInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	var currencies []string
+	for x := range info.Pairs {
+		currencies = append(currencies, common.StringToUpper(x))
+	}
+
+	return currencies, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (w *WEX) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := w.FetchTradablePairs()
+	if err != nil {
+		return err
+	}
+
+	return w.UpdatePairs(pairs, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (w *WEX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (w *WEX) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
-	pairsCollated, err := exchange.GetAndFormatExchangeCurrencies(w.Name, w.GetEnabledCurrencies())
+	pairsCollated, err := exchange.FormatExchangeCurrencies(w.Name, w.GetEnabledPairs())
 	if err != nil {
 		return tickerPrice, err
 	}
@@ -67,7 +135,7 @@ func (w *WEX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price,
 		return tickerPrice, err
 	}
 
-	for _, x := range w.GetEnabledCurrencies() {
+	for _, x := range w.GetEnabledPairs() {
 		currency := exchange.FormatExchangeCurrency(w.Name, x).Lower().String()
 		var tp ticker.Price
 		tp.Pair = x
@@ -83,7 +151,7 @@ func (w *WEX) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price,
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (w *WEX) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (w *WEX) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tick, err := ticker.GetTicker(w.GetName(), p, assetType)
 	if err != nil {
 		return w.UpdateTicker(p, assetType)
@@ -92,7 +160,7 @@ func (w *WEX) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, 
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (w *WEX) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (w *WEX) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(w.GetName(), p, assetType)
 	if err != nil {
 		return w.UpdateOrderbook(p, assetType)
@@ -101,7 +169,7 @@ func (w *WEX) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.B
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (w *WEX) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (w *WEX) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := w.GetDepth(exchange.FormatExchangeCurrency(w.Name, p).String())
 	if err != nil {
@@ -151,7 +219,7 @@ func (w *WEX) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (w *WEX) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (w *WEX) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

@@ -312,7 +312,7 @@ func (b *BTCC) WsUpdateCurrencyPairs() error {
 				availableTickers = append(availableTickers, tickerData.Symbol)
 			}
 
-			err = b.UpdateCurrencies(availableTickers, false, true)
+			err = b.UpdatePairs(availableTickers, false, true)
 			if err != nil {
 				return fmt.Errorf("%s failed to update available currencies. %s",
 					b.Name,
@@ -335,7 +335,7 @@ func (b *BTCC) WsSubscribeToOrderbook() error {
 	mtx.Lock()
 	defer mtx.Unlock()
 
-	for _, pair := range b.GetEnabledCurrencies() {
+	for _, pair := range b.GetEnabledPairs() {
 		formattedPair := exchange.FormatExchangeCurrency(b.GetName(), pair)
 		err := b.Conn.WriteJSON(WsOutgoing{
 			Action: "SubOrderBook",
@@ -353,7 +353,7 @@ func (b *BTCC) WsSubcribeToTicker() error {
 	mtx.Lock()
 	defer mtx.Unlock()
 
-	for _, pair := range b.GetEnabledCurrencies() {
+	for _, pair := range b.GetEnabledPairs() {
 		formattedPair := exchange.FormatExchangeCurrency(b.GetName(), pair)
 		err := b.Conn.WriteJSON(WsOutgoing{
 			Action: "Subscribe",
@@ -371,7 +371,7 @@ func (b *BTCC) WsSubcribeToTrades() error {
 	mtx.Lock()
 	defer mtx.Unlock()
 
-	for _, pair := range b.GetEnabledCurrencies() {
+	for _, pair := range b.GetEnabledPairs() {
 		formattedPair := exchange.FormatExchangeCurrency(b.GetName(), pair)
 		err := b.Conn.WriteJSON(WsOutgoing{
 			Action: "GetTrades",

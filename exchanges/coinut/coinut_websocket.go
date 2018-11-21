@@ -272,7 +272,7 @@ func (c *COINUT) WsSetInstrumentList() error {
 
 // WsSubscribe subscribes to websocket streams
 func (c *COINUT) WsSubscribe() error {
-	pairs := c.GetEnabledCurrencies()
+	pairs := c.GetEnabledPairs()
 
 	for _, p := range pairs {
 		ticker := wsRequest{

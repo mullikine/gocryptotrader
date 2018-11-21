@@ -31,9 +31,9 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - HitBTC Setup() init error")
 	}
 
-	hitbtcConfig.AuthenticatedAPISupport = true
-	hitbtcConfig.APIKey = apiKey
-	hitbtcConfig.APISecret = apiSecret
+	hitbtcConfig.API.AuthenticatedSupport = true
+	hitbtcConfig.API.Credentials.Key = apiKey
+	hitbtcConfig.API.Credentials.Secret = apiSecret
 
 	h.Setup(hitbtcConfig)
 }
@@ -178,18 +178,16 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func isRealOrderTestEnabled() bool {
-	if h.APIKey == "" || h.APISecret == "" ||
-		h.APIKey == "Key" || h.APISecret == "Secret" ||
-		!canManipulateRealOrders {
+	if !h.ValidateAPICredentials() || !canManipulateRealOrders {
 		return false
 	}
+
 	return true
 }
 
 func TestSubmitOrder(t *testing.T) {
 	h.SetDefaults()
 	TestSetup(t)
-	h.Verbose = true
 
 	if !isRealOrderTestEnabled() {
 		t.Skip()
@@ -200,6 +198,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.DGD,
 		SecondCurrency: symbol.BTC,
 	}
+
 	response, err := h.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 10, "1234234")
 	if err != nil || !response.IsOrderPlaced {
 		t.Errorf("Order failed to be placed: %v", err)
